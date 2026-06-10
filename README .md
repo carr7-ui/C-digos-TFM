@@ -187,4 +187,4 @@ py -3.12 tucker_solapamiento_fondo_eda2.py
 
 ## Autora
 
-Carmen · TFM · Universidad Complutense de Madrid · Máster en Bioinformática
+Carmen · TFM · Universidad Complutense de Madrid-Universidad Politécnica de Madrid-Centro Nacional de Investigaciones Oncológicas · Máster en Tratamiento Estadístico y Computacional de la Información
