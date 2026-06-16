@@ -38,15 +38,18 @@ Análisis no supervisado de patrones de invasión en cáncer de vejiga a partir 
 ## Flujo de ejecución
 
 ```
-validacion_con_tile.py  ]
-validacion_sin_tile.py  ]-->  BOXPLOTS.py  -->  QC_PLOTS.py
-                        ]
-                              |
+1º: Ejecutar sin importar el orden:
+validacion_con_tile.py (3 imagenes)  ]
+validacion_sin_tile.py (2 imágenes B14 y B17) ]-->  BOXPLOTS.py  
+2º  QC_PLOTS.py
+
+3º Para el tamaño de 1700 micras con representativo el más cercano al centroide
                          A1_EDA.py  -->  A2_EDA.py  -->  A3_EDA.py
-                         (alternativo: B_POR_FEATURE.py)
-                              |
+
+                         (alternativo para representativo más cercano a la media de esa característica: B_POR_FEATURE.py)
+4º Tucker
                     tucker_grid_search.py  -->  tucker_solapamiento_fondo_eda2.py
-                              |
+5º Clustering
                     clustering_features_eda2.py
 ```
 
@@ -57,7 +60,7 @@ validacion_sin_tile.py  ]-->  BOXPLOTS.py  -->  QC_PLOTS.py
 ### Fase 1 — Validación del modelo
 
 #### validacion_con_tile.py
-Valida las anotaciones del modelo de IA contra las del patólogo en imágenes con tile (múltiples escenas). Lee archivos binarios `.mld` (predicciones del modelo) y `.geojson` (anotaciones del patólogo), alinea ambos espacios de coordenadas y calcula métricas de superposición geométrica (Dice, Recall, Precision) a nivel de slide y a nivel local (ROI). Guarda los resultados en `metricas_globales.csv`.
+Valida las anotaciones del modelo contra las del patólogo en imágenes con tile (múltiples escenas). Lee archivos binarios `.mld` (predicciones del modelo) y `.geojson` (anotaciones del patólogo), alinea ambos espacios de coordenadas y calcula métricas de superposición geométrica (Dice, Recall, Precision) a nivel de slide y a nivel local (ROI). Guarda los resultados en `metricas_globales.csv`.
 
 Entrada: `.mld` + `.geojson`  
 Salida: `metricas_globales.csv`, figuras de solapamiento espacial
@@ -79,7 +82,7 @@ Salida: figuras `.png`
 ### Fase 2 — Quality Control
 
 #### QC_PLOTS.py
-Genera cuatro gráficas de control de calidad a partir del archivo de métricas por imagen (`image_based_metrics_objects.tsv`): cobertura de área analizada, composición tisular (tumor / músculo / otro) e intensidades medias por canal (CK, Magenta, Hematoxilina) para todos los pacientes de la cohorte.
+Genera gráficas de control de calidad a partir del archivo de métricas por imagen (`image_based_metrics_objects.tsv`): cobertura de área analizada, composición tisular (tumor / músculo / otro) e intensidades medias por canal (CK, Magenta, Hematoxilina) para todos los pacientes de la cohorte.
 
 Entrada: `image_based_metrics_objects.tsv`  
 Salida: `cobertura_area_analizada.png`, `composicion_tisular.png`, `intensidades_medias.png`, `intensidades.png`
@@ -91,7 +94,7 @@ Salida: `cobertura_area_analizada.png`, `composicion_tisular.png`, `intensidades
 Los scripts A1, A2 y A3 deben ejecutarse en ese orden. Cada uno lee la salida del anterior.
 
 #### A1_EDA.py (ejecutar primero)
-Lee los archivos `.tsv` de features por tile de todos los casos, aplica limpieza (eliminación de columnas Min/Max Intensity, Entropy 32bins, Std Intensity), normalización por imagen y PCA. Selecciona para cada bin del espacio PCA el tile más cercano al centroide de ese bin. Genera `df_all_completo.csv` y `GUIA_CENTROIDE.csv`.
+Lee los archivos `.tsv` de features por tile de todos los casos, aplica limpieza (eliminación de columnas Min/Max Intensity, Entropy 32bins, Std Intensity), normalización por imagen, feature engineering y PCA. Selecciona para cada bin del espacio PCA el tile más cercano al centroide de ese bin. Genera `df_all_completo.csv` y `GUIA_CENTROIDE.csv`.
 
 Entrada: carpeta de `.tsv` por caso  
 Salida: `df_all_completo.csv`, `GUIA_CENTROIDE.csv`, figuras PCA
@@ -119,7 +122,7 @@ Salida: grid de thumbnails, figuras de solapamiento
 ### Fase 4 — Descomposición Tucker
 
 #### tucker_grid_search.py (ejecutar primero)
-Construye un tensor 3D (casos x bins_PC1 x bins_PC2) a partir de `df_all_completo.csv` y realiza un grid search sobre el número de patrones de paciente (`rp`) y patrones espaciales (`rs`) en la descomposición Tucker no-negativa (librería `tensorly`). Evalúa el error de reconstrucción con múltiples seeds para estabilidad. Genera curvas de codo y heatmap de error.
+Construye un tensor 3D (casos x bins_PC1 x bins_PC2) a partir de `df_all_completo.csv` (del A1) y realiza un grid search sobre el número de patrones de paciente (`rp`) y patrones espaciales (`rs`) en la descomposición Tucker no-negativa (librería `tensorly`). Evalúa el error de reconstrucción. Genera curvas de codo y heatmap de error.
 
 Entrada: `df_all_completo.csv`  
 Salida: `GRID_SEARCH_resultados.csv`, `GRID_SEARCH_curva_error.png`, `GRID_SEARCH_heatmap_error.png`

@@ -1,7 +1,4 @@
 
-"""   ES EL BUENOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
-
-"""
 
 #  CONFIGURACIÓN
 
@@ -155,7 +152,7 @@ try:
     CZI_OK = True
 except ImportError:
     pyczi = None; CZI_OK = False
-    print("[AVISO] pylibCZIrw no disponible — mosaico sin crops reales")
+    print("[AVISO] pylibCZIrw no disponible ")
 
 #  1. TUCKER
 
@@ -215,68 +212,6 @@ df['_pat_dom'] = df.apply(lambda r: bin_patron_dom[(
 df['_pat_intens'] = df.apply(lambda r: float(pattern_maps[r['_pat_dom']][
     min(int(r['_b1']),N_BINS-1), min(int(r['_b2']),N_BINS-1)]), axis=1)
 
-# ============================================================
-# 2. FUNCIONES CZI (recorte de tiles)
-# ============================================================
-
-# def get_center_um(czidoc):
-#     root = ET.fromstring(czidoc.raw_metadata)
-#     for el in root.iter('CenterPosition'):
-#         if el.text:
-#             p = el.text.strip().split(',')
-#             if len(p)==2:
-#                 try: return float(p[0]), float(p[1])
-#                 except: pass
-#     return None, None
-
-# def recortar_tile_czi(czidoc, x1, y1, x2, y2, pxum=0.1723, zoom=0.15):
-#     bbox = czidoc.total_bounding_box
-#     try:
-#         scenes = czidoc.scenes_bounding_rectangle
-#         multi  = len(scenes) > 1
-#     except:
-#         multi = False
-
-#     def dentro(xs, ys, w, h):
-#         return (xs >= bbox['X'][0] and xs+w <= bbox['X'][1] and
-#                 ys >= bbox['Y'][0] and ys+h <= bbox['Y'][1])
-
-#     if not multi:
-#         cx_um, cy_um = get_center_um(czidoc)
-#         if cx_um is None: return None
-#         cx_px = (bbox['X'][0]+bbox['X'][1])/2
-#         cy_px = (bbox['Y'][0]+bbox['Y'][1])/2
-#         px_l = int(round((x1*1000-cx_um)/pxum+cx_px))
-#         px_r = int(round((x2*1000-cx_um)/pxum+cx_px))
-#         py_t = int(round(-(max(y1,y2)*1000-cy_um)/pxum+cy_px))
-#         py_b = int(round(-(min(y1,y2)*1000-cy_um)/pxum+cy_px))
-#         xs=min(px_l,px_r); ys=min(py_t,py_b)
-#         w=abs(px_r-px_l); h=abs(py_b-py_t)
-#         if not dentro(xs,ys,w,h): return None
-#     else:
-#         tyb = bbox['Y'][1]
-#         xs=min(int(round(x1*1000/pxum)),int(round(x2*1000/pxum)))
-#         xe=max(int(round(x1*1000/pxum)),int(round(x2*1000/pxum)))
-#         yt=min(int(round(-(y1*1000/pxum)+tyb)),int(round(-(y2*1000/pxum)+tyb)))
-#         yb=max(int(round(-(y1*1000/pxum)+tyb)),int(round(-(y2*1000/pxum)+tyb)))
-#         w=xe-xs; h=yb-yt; ys=yt
-#         if not dentro(xs,ys,w,h):
-#             cx_um,cy_um=get_center_um(czidoc)
-#             if cx_um is not None:
-#                 cx_px=(bbox['X'][0]+bbox['X'][1])/2
-#                 cy_px=(bbox['Y'][0]+bbox['Y'][1])/2
-#                 px_l=int(round((x1*1000-cx_um)/pxum+cx_px))
-#                 px_r=int(round((x2*1000-cx_um)/pxum+cx_px))
-#                 py_t=int(round(-(max(y1,y2)*1000-cy_um)/pxum+cy_px))
-#                 py_b=int(round(-(min(y1,y2)*1000-cy_um)/pxum+cy_px))
-#                 xs=min(px_l,px_r); ys=min(py_t,py_b)
-#                 w=abs(px_r-px_l); h=abs(py_b-py_t)
-#             if not dentro(xs,ys,w,h): return None
-
-#     reg = czidoc.read(roi=(xs,ys,w,h), zoom=zoom)
-#     if reg is None or reg.size==0 or reg.max()==0: return None
-#     img = Image.fromarray(reg[...,::-1].astype(np.uint8))
-#     return img.resize((int(round(w*zoom)),int(round(h*zoom))), Image.LANCZOS)
 
 #  2. FUNCIONES CZI (recorte de tiles)
 
@@ -458,10 +393,10 @@ for p in range(N_PAT):
     print(f"  {n_crops} crops recopilados")
 
     if n_crops == 0:
-        print(f"  Sin crops — saltando Patrón {p+1}")
+        print(f"  Sin crops en {p+1}")
         continue
 
-    #  Montar mosaico ─
+    #  Montar mosaico 
     ncols_m = min(8, n_crops)
     nrows_m = (n_crops + ncols_m - 1) // ncols_m
 
@@ -627,8 +562,7 @@ def separar_mld(objetos, nombres_por_capa):
     return tiles, anots, ts
 
 
-#5. SOLAPAMIENTO CON RECUADROS — DOS VERSIONES POR CASO
-
+#5. SOLAPAMIENTO CON RECUADROS
 ZOOM_FONDO = 0.15
 
 
@@ -664,10 +598,7 @@ def construir_fondo_czi(czidoc, df_caso, canvas_mm):
         if img_tile is None:
             continue
 
-        # Posición en el canvas:
-        # x_min del canvas → píxel 0 en X
-        # y_min del canvas → píxel 0 en Y (Y crece hacia abajo en PIL)
-        # ty1 es el borde superior del tile (Y menor = arriba en el MLD)
+
         y_top = min(ty1, ty2)   # el borde con menor Y es el de arriba
         px_x  = int(round((tx1 - canvas_mm['x_min']) * px_por_mm))
         px_y  = int(round((y_top - canvas_mm['y_min']) * px_por_mm))
@@ -853,7 +784,7 @@ for caso in CASOS_SOLAPAMIENTO:
 
 
 #6. GRID DE THUMBNAILS + OVERLAY TUCKER (del tucker_overlay)
-# 
+
 
 from scipy.ndimage import gaussian_filter
 
@@ -960,8 +891,8 @@ if Path(GRID_PNG).exists():
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_title(f"Patrón {p+1}\nH={entropias_g[p]:.2f} bits",
                      fontsize=12,fontweight="bold",color=col,pad=8)
-        ax.set_xlabel("PC1 →",fontsize=9)
-        if p==0: ax.set_ylabel("← PC2",fontsize=9)
+        ax.set_xlabel("PC1 ",fontsize=9)
+        if p==0: ax.set_ylabel(" PC2",fontsize=9)
         for spine in ax.spines.values():
             spine.set_edgecolor(col); spine.set_linewidth(3)
     plt.suptitle(f"Patrones Morfológicos Tucker — Atlas de Vejiga\n"
@@ -982,7 +913,7 @@ if Path(GRID_PNG).exists():
             ax.axhline(i*CELDA_PX,color="white",lw=0.4,alpha=0.4,zorder=6)
         ax.set_xlim(0,gs); ax.set_ylim(gs,0)
         ax.set_xticks([]); ax.set_yticks([])
-        ax.set_xlabel("PC1 →",fontsize=11); ax.set_ylabel("← PC2",fontsize=11)
+        ax.set_xlabel("PC1 ",fontsize=11); ax.set_ylabel(" PC2",fontsize=11)
         for spine in ax.spines.values():
             spine.set_edgecolor(col); spine.set_linewidth(4)
         plt.title(f"Patrón {p+1}  |  H={entropias_g[p]:.2f} bits",
@@ -1007,7 +938,7 @@ if Path(GRID_PNG).exists():
             ax_grid.axhline(i*CELDA_PX,color="white",lw=0.4,alpha=0.4,zorder=6)
         ax_grid.set_xlim(0,gs); ax_grid.set_ylim(gs,0)
         ax_grid.set_xticks([]); ax_grid.set_yticks([])
-        ax_grid.set_xlabel("PC1 →",fontsize=10); ax_grid.set_ylabel("← PC2",fontsize=10)
+        ax_grid.set_xlabel("PC1 ",fontsize=10); ax_grid.set_ylabel("PC2",fontsize=10)
         ax_grid.set_title(f"Patrón {p+1}  |  H={entropias_g[p]:.2f} bits\n"
                           f"Grid tiles representativos + overlay Tucker",
                           fontsize=11,fontweight="bold",color=col,pad=8)
@@ -1077,7 +1008,7 @@ if Path(GRID_PNG).exists():
         ax.axhline(i*CELDA_PX,color="white",lw=0.4,alpha=0.4,zorder=6)
     ax.set_xlim(0,gs); ax.set_ylim(gs,0)
     ax.set_xticks([]); ax.set_yticks([])
-    ax.set_xlabel("PC1 →",fontsize=12); ax.set_ylabel("← PC2",fontsize=12)
+    ax.set_xlabel("PC1 ",fontsize=12); ax.set_ylabel(" PC2",fontsize=12)
     handles_dom=[mpatches_g.Patch(facecolor=COLORS_PAT[p],
                                    label=f"Patrón {p+1} (H={entropias_g[p]:.2f} bits)",
                                    edgecolor="white",lw=0.5) for p in range(N_PAT)]
@@ -1222,7 +1153,7 @@ plt.suptitle("PERFIL DIFERENCIAL POR PATRÓN TUCKER — Z-score\n"
 #plt.savefig(out("SUPER_FIGURA_zscore.png"),dpi=180,bbox_inches="tight",facecolor="white")
 plt.close(); 
 
-#  9. SUPERFIGURA HEATMAP DIFERENCIAL (más compacto)
+#  9. SUPERFIGURA HEATMAP DIFERENCIAL 
 
 # Top features más discriminantes (mayor varianza entre patrones)
 varianza_entre_pat = df_z.var(axis=1).sort_values(ascending=False)
@@ -1262,8 +1193,6 @@ plt.close();
 df_ca[["Case"]+pat_cols_a+["patron_dominante"]].to_csv(
     out("TUCKER_contribuciones_por_caso.csv"),index=False,sep=";",encoding="utf-8-sig")
 df_corr.to_csv(out("TUCKER_correlacion_features.csv"),index=False,sep=";",encoding="utf-8-sig")
-
-
 
 
 #  6. HEATMAP CONTRIBUCIONES + PIE + CORRELACIONES
@@ -1366,7 +1295,6 @@ pd.DataFrame({"Patron":pat_cols_a, "Entropia_bits":[round(e,4) for e in entropia
 
 
 #  7. SUPERFIGURA: MEDIA REAL DE FEATURES POR PATRÓN
-
 
 # Asignar patrón dominante del BIN a cada tile
 df_ca["_pat_dom_num"] = df_ca["patron_dominante"].str.extract(r"(\d+)").astype(int) - 1
@@ -1478,7 +1406,6 @@ plt.savefig(out("SUPER_FIGURA_heatmap_diferencial.png"), dpi=200, bbox_inches="t
 plt.close(); 
 
 
-
 #  EXPORTAR TUCKER_MODEL.pkl
 import pickle
 
@@ -1502,8 +1429,6 @@ with open(pkl_path, "wb") as f:
 print(f"   TUCKER_MODEL.pkl exportado → {pkl_path}")
 
 #  SUPERFIGURA MEJOR PARA MEDIA REAL POR PATRÓN (
-
-
 
 col_x1 = 'Object Info (tile) - Envelope left'
 col_y1 = 'Object Info (tile) - Envelope top'
@@ -1642,12 +1567,10 @@ print(f"   TUCKER_tiles_patron_dom.csv ({len(df):,} filas)")
 
 
 
-########MEJORAS
+########MEJORAS########
 
 
 # MEJORA 1: SUPER_FIGURA_media_patron_v2 con etiquetas verticales
-
-
 
 fig, axes = plt.subplots(1, N_PAT,
                           figsize=(24, max(18, len(orden_v2)*0.25 + 2)),
@@ -1705,9 +1628,7 @@ for p in range(N_PAT):
     else:
         ax.tick_params(left=False)
 
-plt.suptitle('PERFIL MORFOLOGICO POR PATRON TUCKER\n'
-             'Barra larga = ese patron tiene MUCHO de esa feature  |  '
-             'Barra corta = POCO  |  Linea discontinua = punto medio',
+plt.suptitle('PERFIL MORFOLOGICO POR PATRON TUCKER\n',
              fontsize=13, fontweight='bold', y=0.98)
 plt.savefig(out('SUPER_FIGURA_media_patron_v2.png'),
             dpi=180, bbox_inches='tight', facecolor='white')
@@ -1738,7 +1659,7 @@ df_export_features.to_csv(
 print(f"   features_medias_por_patron.csv ({len(df_export_features)} features)")
 
 
-# MEJORA 3: TUCKER_contribuciones_por_caso.xlsx
+# MEJORA 2: TUCKER_contribuciones_por_caso.xlsx
 
 
 # Hoja 1: contribuciones normalizadas
@@ -1772,8 +1693,5 @@ with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
             ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 30)
 
 
-# RESUMEN
 
-
-
-# #py -3.12 c:/Users/carme/OneDrive/Escritorio/M.UCM/TFM/1700MICRAS/CENTROIDE/FEATURE_ENGINEERING/TUCKER/tucker_solapamiento_fondo_eda2.py
+# para ejecutar #py -3.12 c:/Users/carme/OneDrive/Escritorio/M.UCM/TFM/1700MICRAS/CENTROIDE/FEATURE_ENGINEERING/TUCKER/tucker_solapamiento_fondo_eda2.py

@@ -1,505 +1,3 @@
-# """
-# clustering_composicion_tiles.py
-# ================================
-# Clustering de CASOS basado en la COMPOSICION de patrones de tiles.
-# OPTIMIZADO: PCA en tiles, K=4 en casos y Dominancia Relativa en Tucker.
-# """
-
-# # ============================================================
-# # CONFIGURACION
-# # ============================================================
-
-# DF_ALL_CSV    = r"C:\Users\carme\OneDrive\Escritorio\M.UCM\TFM\1700MICRAS\CENTROIDE\FEATURE_ENGINEERING\new_eda2\df_all_completo.csv"
-# TUCKER_CSV    = r"C:\Users\carme\OneDrive\Escritorio\M.UCM\TFM\1700MICRAS\CENTROIDE\FEATURE_ENGINEERING\TUCKER\CLUSTERING\CLUSTERING_resultados_por_caso.csv"
-# OUTPUT_FOLDER = r"C:\Users\carme\OneDrive\Escritorio\M.UCM\TFM\1700MICRAS\CENTROIDE\FEATURE_ENGINEERING\CLUSTERING_EDA2"
-
-# K_TILES          = 5     # tipos de tile
-# K_RANGE_CASOS    = range(2, 9)
-# K_FORZADO_CASOS  = 4     # <-- MEJORA 1: Forzamos K=4 para eliminar el micro-cluster de 3 pacientes
-# ZSCORE_OUTLIER   = 3.5
-
-# CZI_FOLDER      = r"\\imgserver\IMAGES\CONFOCAL\IA\crodriguezj\images"
-# PIXEL_SIZE_UM   = 0.1723
-# ZOOM_CZI        = 0.15
-# CROP_SIZE_PX    = (220, 220)
-# MAX_CROPS_TOTAL = 50
-# MAX_CROPS_CASO  = 3
-
-# CLUSTER_COLORS = ['#E74C3C','#3498DB','#2ECC71','#F39C12','#9B59B6','#1ABC9C','#E67E22']
-# TILE_COLORS    = ['#E74C3C','#3498DB','#2ECC71','#F39C12','#9B59B6']
-
-# col_x1 = 'Object Info (tile) - Envelope left'
-# col_y1 = 'Object Info (tile) - Envelope top'
-# col_x2 = 'Object Info (tile) - Envelope right'
-# col_y2 = 'Object Info (tile) - Envelope bottom'
-
-# # ============================================================
-# # IMPORTS
-# # ============================================================
-
-# import os, warnings
-# from pathlib import Path
-# from collections import Counter
-
-# import numpy as np
-# import pandas as pd
-# import matplotlib
-# matplotlib.use('Agg')
-# import matplotlib.pyplot as plt
-# import matplotlib.patches as mpatches
-# import seaborn as sns
-
-# from scipy import stats
-# from sklearn.preprocessing import StandardScaler
-# from sklearn.cluster import KMeans, AgglomerativeClustering, SpectralClustering
-# from sklearn.mixture import GaussianMixture
-# from sklearn.decomposition import PCA as skPCA
-# from sklearn.metrics import (silhouette_score, silhouette_samples,
-#                              davies_bouldin_score, calinski_harabasz_score,
-#                              adjusted_rand_score)
-# from sklearn.utils import resample
-# from scipy.cluster.hierarchy import dendrogram, linkage
-
-# try:
-#     import hdbscan
-#     HDBSCAN_OK = True
-# except ImportError:
-#     HDBSCAN_OK = False
-#     print("[AVISO] hdbscan no disponible.")
-
-# warnings.filterwarnings('ignore')
-# Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)
-# def out(f): return os.path.join(OUTPUT_FOLDER, f)
-
-# # ============================================================
-# # 1. CARGAR DATOS
-# # ============================================================
-
-# print("Cargando df_all_completo...")
-# df = pd.read_csv(DF_ALL_CSV)
-# print(f"  Shape: {df.shape}")
-# print(f"  Casos: {df['Case'].nunique()}")
-# print(f"  Tiles: {len(df):,}")
-
-# N_CASOS = df['Case'].nunique()
-
-# # ============================================================
-# # 2. FEATURES BIOLOGICAS PARA CLUSTERING DE TILES
-# # ============================================================
-
-# print("\nSeleccionando features biologicas...")
-
-# excluir = {col_x1, col_y1, col_x2, col_y2, 'Case', '_b1', '_b2',
-#            '_pat_dom', '_pat_intens', '_pat_color_g'}
-
-# cols_bio_ok = [c for c in df.columns
-#                if df[c].dtype in [float,'float64']
-#                if c not in excluir
-#                and not c.startswith('PC')
-#                and not c.startswith('_')
-#                and any(x in c for x in ['(Tumor)','(Muscle)','(No tumor/No muscle)','Interface'])
-#                and df[c].isna().mean() < 0.3
-#                and df[c].std() > 1e-6]
-
-# print(f"  Features válidas: {len(cols_bio_ok)}")
-
-# X_tiles_raw = df[cols_bio_ok].copy()
-# for c in cols_bio_ok:
-#     X_tiles_raw[c].fillna(X_tiles_raw[c].median(), inplace=True)
-
-# scaler_tiles = StandardScaler()
-# X_tiles      = scaler_tiles.fit_transform(X_tiles_raw.values)
-# print(f"  Matriz de tiles original: {X_tiles.shape}")
-
-# # ============================================================
-# # 3. CLUSTERING DE TILES (PASO 1 CON PCA INTERMEDIO)
-# # ============================================================
-
-# print(f"\n{'='*55}")
-# print(f"PASO 1: CLUSTERING DE TILES (k={K_TILES}) con PCA de limpieza")
-# print(f"{'='*55}")
-
-# # --- MEJORA 2: Reducción PCA intermedia para limpiar el ruido multidimensional de los tiles ---
-# print("  Aplicando reducción PCA intermedia a los tiles para maximizar nitidez fenotípica...")
-# pca_reductores = skPCA(n_components=6, random_state=42) # 6 componentes limpian el ruido redundante
-# X_tiles_clean = pca_reductores.fit_transform(X_tiles)
-
-# km_tiles     = KMeans(n_clusters=K_TILES, random_state=42, n_init=30, max_iter=500)
-# labels_tiles = km_tiles.fit_predict(X_tiles_clean)
-# df['cluster_tile'] = labels_tiles + 1
-
-# # La evaluación de silueta se hace sobre el espacio limpio donde clusterizamos
-# sil_tiles = silhouette_score(X_tiles_clean, labels_tiles, sample_size=2000)
-# print(f"  Silhouette de tiles (en espacio PCA limpio): {sil_tiles:.3f}")
-# print(f"  Distribución de tiles: {dict(pd.Series(labels_tiles+1).value_counts().sort_index())}")
-
-# # Perfil biológico (sobre variables originales para poder interpretarlo)
-# df_tile_profile = pd.DataFrame(X_tiles, columns=cols_bio_ok)
-# df_tile_profile['cluster_tile'] = labels_tiles + 1
-# medias_tiles = df_tile_profile.groupby('cluster_tile')[cols_bio_ok].mean()
-# z_tiles      = medias_tiles.apply(lambda x: (x-x.mean())/(x.std()+1e-12), axis=0)
-
-# print("\n  Top features por cluster de tile:")
-# for ct in range(1, K_TILES+1):
-#     top5 = z_tiles.loc[ct].abs().nlargest(5).index.tolist()
-#     vals = [(f.split('(')[0].strip()[:18], f"{z_tiles.loc[ct,f]:.2f}") for f in top5]
-#     print(f"    Tile C{ct}: " + " | ".join([f"{n}={v}" for n,v in vals]))
-
-# # Figura perfil tiles
-# varianza_tiles = z_tiles.var(axis=0).sort_values(ascending=False)
-# top30_tiles    = varianza_tiles.head(30).index.tolist()
-
-# def nombre_corto(f):
-#     for rep,sust in [(' (No tumor/No muscle)','\n(Str)'),(' (Muscle)','\n(Mus)'),
-#                      (' (Tumor)','\n(Tum)'),('Interface Length ','Interf.'),
-#                      ('Intensity','Int.'),('Entropy 32bins ','Entr.'),('Area_div_','A/')]:
-#         f = f.replace(rep, sust)
-#     return f[:25]
-
-# fig, axes = plt.subplots(1, K_TILES,
-#                           figsize=(4*K_TILES, max(10, len(top30_tiles)*0.35)),
-#                           sharey=True, facecolor='white')
-# plt.subplots_adjust(wspace=0.02)
-# if K_TILES == 1: axes = [axes]
-# pos_y = np.arange(len(top30_tiles))
-# for ct_idx, ax in enumerate(axes):
-#     ct = ct_idx+1; col = TILE_COLORS[ct_idx]
-#     vals = z_tiles.loc[ct, top30_tiles].values
-#     ax.barh(pos_y, vals,
-#             color=['#C0392B' if v>0 else '#2980B9' for v in vals],
-#             edgecolor='none', height=0.7, alpha=0.88)
-#     ax.axvline(0, color='black', lw=1); ax.set_xlim(-3, 3)
-#     ax.grid(axis='x', linestyle='--', alpha=0.3)
-#     ax.set_title(f'Tile C{ct}\n({(labels_tiles+1==ct).sum():,} tiles)',
-#                  fontsize=11, fontweight='bold', color=col)
-#     ax.set_xlabel('Z-score', fontsize=8)
-#     if ct == 1:
-#         ax.set_yticks(pos_y)
-#         ax.set_yticklabels([nombre_corto(f) for f in top30_tiles], fontsize=7)
-#     else:
-#         ax.tick_params(left=False)
-#     for spine in ax.spines.values():
-#         spine.set_edgecolor(col); spine.set_linewidth(2)
-# plt.suptitle(f'Perfil Biológico de Clusters de Tiles (k={K_TILES})',
-#              fontsize=13, fontweight='bold', y=0.98)
-# plt.savefig(out('00_perfil_clusters_tiles.png'), dpi=180, bbox_inches='tight', facecolor='white')
-# plt.close()
-# print("  ✓ 00_perfil_clusters_tiles.png")
-
-# # ============================================================
-# # 4. COMPOSICION PORCENTUAL POR CASO (PASO 2)
-# # ============================================================
-
-# print(f"\n{'='*55}")
-# print(f"PASO 2: COMPOSICION DE TILES POR CASO")
-# print(f"{'='*55}")
-
-# df_comp = (df.groupby('Case')['cluster_tile']
-#              .value_counts(normalize=True)
-#              .unstack(fill_value=0))
-# for ct in range(1, K_TILES+1):
-#     if ct not in df_comp.columns: df_comp[ct] = 0.0
-# df_comp = df_comp[[ct for ct in range(1, K_TILES+1)]].copy()
-# df_comp.columns = [f'pct_TileC{ct}' for ct in range(1, K_TILES+1)]
-# df_comp = df_comp.reset_index()
-# pct_cols = [f'pct_TileC{ct}' for ct in range(1, K_TILES+1)]
-
-# print(f"  Casos: {len(df_comp)}")
-# print(df_comp[pct_cols].describe().round(3).to_string())
-
-# df_comp.to_csv(out('COMPOSICION_tiles_por_caso.csv'),
-#                 index=False, sep=';', encoding='utf-8-sig', decimal=',')
-# print("  ✓ COMPOSICION_tiles_por_caso.csv")
-
-# # Heatmap composición
-# fig, ax = plt.subplots(figsize=(N_CASOS*0.3+2, 5), facecolor='white')
-# data_hm  = df_comp.set_index('Case')[pct_cols].T
-# caso_dom = df_comp.set_index('Case')[pct_cols].idxmax(axis=1)
-# orden_c  = df_comp.set_index('Case').assign(_d=caso_dom).sort_values('_d').index
-# sns.heatmap(data_hm[orden_c], ax=ax, cmap='YlOrRd', vmin=0, vmax=1,
-#             xticklabels=True,
-#             yticklabels=[f'Tile C{ct}' for ct in range(1, K_TILES+1)],
-#             cbar_kws={'label':'% tiles','shrink':0.6},
-#             linewidths=0.2, linecolor='#DDDDDD')
-# ax.set_xticklabels(ax.get_xticklabels(), rotation=75, ha='right', fontsize=5)
-# for label, col in zip(ax.get_yticklabels(), TILE_COLORS): label.set_color(col)
-# ax.set_title(f'Composición de Tipos de Tile por Caso (n={N_CASOS})',
-#             fontsize=12, fontweight='bold')
-# plt.tight_layout()
-# plt.savefig(out('01_composicion_heatmap.png'), dpi=200, bbox_inches='tight', facecolor='white')
-# plt.close()
-# print("  ✓ 01_composicion_heatmap.png")
-
-# # ============================================================
-# # 5. DETECCION DE OUTLIERS
-# # ============================================================
-
-# print(f"\n{'='*55}")
-# print(f"DETECCION DE OUTLIERS (z-score > {ZSCORE_OUTLIER})")
-# print(f"{'='*55}")
-
-# z_matrix  = np.abs(stats.zscore(df_comp[pct_cols].values))
-# mask_ok   = (z_matrix < ZSCORE_OUTLIER).all(axis=1)
-# n_outliers = (~mask_ok).sum()
-
-# if n_outliers > 0:
-#     outlier_casos = df_comp.loc[~mask_ok, 'Case'].tolist()
-#     for caso in outlier_casos:
-#         idx = df_comp.index[df_comp['Case']==caso][0]
-#         zs  = z_matrix[idx]
-#         top = sorted(zip(pct_cols, zs), key=lambda x: -x[1])[:3]
-#         top_str = ', '.join([f"{c}(z={z:.1f})" for c,z in top if z>ZSCORE_OUTLIER])
-#         print(f"  ⚠ OUTLIER: {caso} → {top_str}")
-#     print(f"\n  Total outliers: {n_outliers}")
-#     df_comp_cluster = df_comp[mask_ok].copy().reset_index(drop=True)
-# else:
-#     print(f"  ✓ Sin outliers")
-#     outlier_casos   = []
-#     df_comp_cluster = df_comp.copy()
-
-# casos_cluster = df_comp_cluster['Case'].tolist()
-# print(f"  Casos para clustering: {len(casos_cluster)}")
-
-# scaler_casos = StandardScaler()
-# X_casos      = scaler_casos.fit_transform(df_comp_cluster[pct_cols].values)
-
-# # ============================================================
-# # 6. METRICAS PARA k OPTIMO
-# # ============================================================
-
-# print(f"\n{'='*55}")
-# print(f"PASO 3: CLUSTERING DE CASOS")
-# print(f"{'='*55}")
-# print("\nCalculando métricas para k óptimo...")
-
-# metricas = {'k':[],'inercia':[],'silhouette':[],'davies_bouldin':[],'calinski':[]}
-# for k in K_RANGE_CASOS:
-#     if k >= len(casos_cluster): continue
-#     km     = KMeans(n_clusters=k, random_state=42, n_init=20)
-#     labels = km.fit_predict(X_casos)
-#     metricas['k'].append(k)
-#     metricas['inercia'].append(km.inertia_)
-#     metricas['silhouette'].append(silhouette_score(X_casos, labels))
-#     metricas['davies_bouldin'].append(davies_bouldin_score(X_casos, labels))
-#     metricas['calinski'].append(calinski_harabasz_score(X_casos, labels))
-
-# df_met  = pd.DataFrame(metricas)
-# best_s  = int(df_met.loc[df_met['silhouette'].idxmax(), 'k'])
-# best_db = int(df_met.loc[df_met['davies_bouldin'].idxmin(), 'k'])
-# best_ch = int(df_met.loc[df_met['calinski'].idxmax(), 'k'])
-
-# print(df_met.to_string(index=False))
-
-# # Seleccionar K_FINAL dinámico o forzado
-# if K_FORZADO_CASOS is not None:
-#     K_FINAL = K_FORZADO_CASOS
-#     print(f"\nUsando K_FINAL = {K_FINAL}  (forzado para equilibrio estructural)")
-# else:
-#     K_FINAL = Counter([best_s, best_db, best_ch]).most_common(1)[0][0]
-#     print(f"\nUsando K_FINAL = {K_FINAL}  (votación: Sil={best_s}, DB={best_db}, CH={best_ch})")
-
-# fig, axes = plt.subplots(2, 2, figsize=(13,9), facecolor='white')
-# fig.suptitle('Métricas para k óptimo — Clustering por Composición de Tiles', fontsize=13, fontweight='bold')
-# pares = [(axes[0,0],'inercia','#E74C3C','Inercia → buscar codo',None),
-#          (axes[0,1],'silhouette','#3498DB','Silhouette → mayor = mejor',best_s),
-#          (axes[1,0],'davies_bouldin','#2ECC71','Davies-Bouldin → menor mejor',best_db),
-#          (axes[1,1],'calinski','#9B59B6','Calinski → mayor = mejor',best_ch)]
-# for ax,met,col,tit,bk in pares:
-#     ax.plot(df_met['k'], df_met[met], 'o-', color=col, lw=2, ms=8)
-#     ax.set_title(tit, fontsize=10, fontweight='bold')
-#     ax.set_xlabel('k'); ax.grid(alpha=0.3); ax.set_xticks(list(df_met['k']))
-#     if bk: ax.axvline(bk, color=col, linestyle='--', alpha=0.7, label=f'mejor k={bk}')
-#     if K_FINAL: ax.axvline(K_FINAL, color='black', linestyle=':', alpha=0.6, label=f'K_FINAL={K_FINAL}')
-#     ax.legend(fontsize=8)
-# plt.tight_layout(rect=[0, 0.05, 1, 1])
-# plt.savefig(out('02_metricas_k_optimo.png'), dpi=200, bbox_inches='tight', facecolor='white')
-# plt.close()
-
-# # ============================================================
-# # 7. APLICAR TODOS LOS ALGORITMOS
-# # ============================================================
-
-# print(f"\nAplicando clustering k={K_FINAL} con todos los algoritmos...")
-
-# km_final  = KMeans(n_clusters=K_FINAL, random_state=42, n_init=50)
-# labels_km = km_final.fit_predict(X_casos)
-
-# hc_final  = AgglomerativeClustering(n_clusters=K_FINAL, linkage='ward')
-# labels_hc = hc_final.fit_predict(X_casos)
-
-# gmm_final = GaussianMixture(n_components=K_FINAL, covariance_type='full', random_state=42, n_init=20)
-# gmm_final.fit(X_casos)
-# labels_gm = gmm_final.predict(X_casos)
-# proba_gm  = gmm_final.predict_proba(X_casos)
-
-# spec        = SpectralClustering(n_clusters=K_FINAL, random_state=42, affinity='nearest_neighbors', n_neighbors=10)
-# labels_spec = spec.fit_predict(X_casos)
-
-# if HDBSCAN_OK:
-#     clusterer   = hdbscan.HDBSCAN(min_cluster_size=5, min_samples=3, metric='euclidean')
-#     labels_hdb  = clusterer.fit_predict(X_casos)
-#     n_cl_hdb    = len(set(labels_hdb)) - (1 if -1 in labels_hdb else 0)
-#     n_noise_hdb = (labels_hdb == -1).sum()
-# else:
-#     labels_hdb, n_cl_hdb, n_noise_hdb = np.full(len(X_casos), -1), 0, len(X_casos)
-
-# df_comp_cluster['cluster_kmeans']     = labels_km + 1
-# df_comp_cluster['cluster_jerarquico'] = labels_hc + 1
-# df_comp_cluster['cluster_gmm']        = labels_gm + 1
-# df_comp_cluster['cluster_spectral']   = labels_spec + 1
-# df_comp_cluster['cluster_hdbscan']    = labels_hdb
-
-# # ============================================================
-# # 8. DENDROGRAMA Y PROYECCIONES
-# # ============================================================
-
-# print("\nGenerando gráficos de comparación de clusters...")
-# Z_link = linkage(X_casos, method='ward')
-# fig, ax = plt.subplots(figsize=(max(18, len(casos_cluster)*0.28), 8), facecolor='white')
-# dendrogram(Z_link, labels=list(casos_cluster), ax=ax, color_threshold=0.7*max(Z_link[:,2]), leaf_rotation=75, leaf_font_size=6)
-# plt.savefig(out('03_dendrograma.png'), dpi=180, bbox_inches='tight')
-# plt.close()
-
-# pca2   = skPCA(n_components=2)
-# X_2d   = pca2.fit_transform(X_casos)
-# var_2d = pca2.explained_variance_ratio_
-
-# fig, axes = plt.subplots(1, 3, figsize=(18,6), facecolor='white')
-# for ax, titulo, etq in zip(axes, ['K-Means','Jerárquico (Ward)','GMM'], [labels_km+1, labels_hc+1, labels_gm+1]):
-#     for k in range(1, K_FINAL+1):
-#         mask = etq == k
-#         ax.scatter(X_2d[mask,0], X_2d[mask,1], c=CLUSTER_COLORS[k-1], s=90, alpha=0.85, edgecolors='white', label=f'C{k}')
-#         if mask.sum() > 0: ax.scatter(X_2d[mask,0].mean(), X_2d[mask,1].mean(), c=CLUSTER_COLORS[k-1], s=220, marker='*', edgecolors='black')
-# plt.savefig(out('04_proyeccion_2d.png'), dpi=200, bbox_inches='tight')
-# plt.close()
-
-# # 10. Comparación 4 Algoritmos
-# fig, axes = plt.subplots(1, 4, figsize=(24,6), facecolor='white')
-# algoritmos = [('K-Means', labels_km+1), ('Spectral', labels_spec+1), ('Jerárquico', labels_hc+1), ('HDBSCAN', labels_hdb)]
-# for ax, (titulo, etq) in zip(axes, algoritmos):
-#     for k in sorted(set(etq)):
-#         mask  = etq == k
-#         color = '#AAAAAA' if k == -1 else CLUSTER_COLORS[(k-1) % len(CLUSTER_COLORS)]
-#         ax.scatter(X_2d[mask,0], X_2d[mask,1], c=color, s=80, alpha=0.85, edgecolors='white')
-# plt.savefig(out('04b_comparacion_algoritmos.png'), dpi=200, bbox_inches='tight')
-# plt.close()
-
-# # ============================================================
-# # 11. PERFIL DE COMPOSICION POR CLUSTER
-# # ============================================================
-
-# medias_comp = df_comp_cluster.groupby('cluster_kmeans')[pct_cols].mean()
-
-# fig, ax = plt.subplots(figsize=(K_FINAL*1.8+2, K_TILES*0.8+2), facecolor='white')
-# im = ax.imshow(medias_comp[pct_cols].values.T*100, cmap='YlOrRd', vmin=0, vmax=100, aspect='auto')
-# ax.set_xticks(range(K_FINAL)); ax.set_yticks(range(K_TILES))
-# ax.set_xticklabels([f'Cluster {cl}\n(n={(labels_km+1==cl).sum()})' for cl in range(1,K_FINAL+1)], fontweight='bold')
-# ax.set_yticklabels([f'Tile C{ct}' for ct in range(1,K_TILES+1)], fontweight='bold')
-# for i in range(K_TILES):
-#     for j in range(K_FINAL):
-#         val = medias_comp[pct_cols].values.T[i,j]*100
-#         ax.text(j, i, f'{val:.0f}%', ha='center', va='center', fontsize=11, fontweight='bold', color='white' if val>50 else 'black')
-# plt.savefig(out('05b_composicion_heatmap.png'), dpi=200, bbox_inches='tight')
-# plt.close()
-
-# # ============================================================
-# # 13. PERFIL FEATURES BIOLOGICAS POR CLUSTER
-# # ============================================================
-
-# df_feat = df[df['Case'].isin(casos_cluster)][['Case']+cols_bio_ok].merge(df_comp_cluster[['Case','cluster_kmeans']], on='Case', how='left')
-# df_fc   = df_feat.groupby('cluster_kmeans')[cols_bio_ok].mean().T
-# df_fc.columns = [f'C{k}' for k in df_fc.columns]
-# df_fn   = df_fc.copy()
-# for feat in df_fn.index:
-#     row = df_fn.loc[feat]; rng = row.max()-row.min()
-#     df_fn.loc[feat] = (row-row.min())/rng if rng>1e-10 else 0.5
-
-# grupos = {'MUSCULO': [c for c in cols_bio_ok if '(Muscle)' in c], 'TUMOR': [c for c in cols_bio_ok if '(Tumor)' in c],
-#           'ESTROMA': [c for c in cols_bio_ok if '(No tumor/No muscle)' in c], 'INTERFAZ': [c for c in cols_bio_ok if 'Interface' in c]}
-
-# orden, etq, sep, pos = [], [], {}, 0
-# for gnom,feats in grupos.items():
-#     if not feats: continue
-#     fs=sorted(feats); sep[gnom]=(pos,pos+len(fs))
-#     for f in fs: orden.append(f); etq.append(f.replace(' (No tumor/No muscle)','').replace(' (Muscle)','').replace(' (Tumor)',''))
-#     pos+=len(fs)
-
-# pos_y=np.arange(len(orden)); BG=['#F0F0F0','#E8E8E8','#F0F0F0','#E8E8E8']
-# fig,axes=plt.subplots(1,K_FINAL,figsize=(5*K_FINAL,max(16,len(orden)*0.22+2)), sharey=True,facecolor='white')
-# plt.subplots_adjust(wspace=0.03,left=0.16,right=0.97,top=0.93,bottom=0.03)
-# for k_idx,ax in enumerate(axes):
-#     k=k_idx+1; col=CLUSTER_COLORS[k_idx]; cn=f'C{k}'
-#     if cn not in df_fn.columns: continue
-#     vals=df_fn.reindex(orden)[cn].values
-#     for gi,(gnom,(g0,g1)) in enumerate(sep.items()): ax.axhspan(g0-0.5,g1-0.5,facecolor=BG[gi%4],alpha=0.5,zorder=0)
-#     ax.barh(pos_y,vals,color=col,edgecolor='none',height=0.75,alpha=0.88,zorder=2)
-#     if k==1:
-#         ax.set_yticks(pos_y); ax.set_yticklabels(etq,fontsize=6.5)
-#         for gnom,(g0,g1) in sep.items(): ax.text(-0.02,(g0+g1)/2-0.5,gnom,ha='right',va='center',fontweight='bold',transform=ax.get_yaxis_transform())
-#     for spine in ax.spines.values(): spine.set_edgecolor(col); spine.set_linewidth(2.5)
-# plt.savefig(out('07_perfil_features_por_cluster.png'), dpi=180, bbox_inches='tight')
-# plt.close()
-
-# # ============================================================
-# # 14. COMPARACION CON PATRONES TUCKER (CON MEJORA DE Z-SCORE)
-# # ============================================================
-
-# TUCKER_SCORES_CSV  = r"C:\Users\carme\OneDrive\Escritorio\M.UCM\TFM\1700MICRAS\CENTROIDE\FEATURE_ENGINEERING\TUCKER\new_eda2\TUCKER_contribuciones_por_caso.csv"
-
-# if Path(TUCKER_SCORES_CSV).exists():
-#     print("\n" + "="*55 + "\nCOMPARACION CON PATRONES TUCKER (MEJORADA)\n" + "="*55)
-#     df_tucker_scores = pd.read_csv(TUCKER_SCORES_CSV, sep=';')
-#     pat_tucker_cols  = [c for c in df_tucker_scores.columns if c.startswith('Patron_')]
-#     N_PAT_T = len(pat_tucker_cols); COLORS_PAT_T = ['#2ECC71','#F39C12','#E74C3C','#9B59B6','#3498DB']
-
-#     # --- MEJORA 3: Calcular dominancia por Z-score relativo de columna para evitar el sesgo del Patrón 4 ---
-#     tucker_z = df_tucker_scores[pat_tucker_cols].apply(lambda x: (x - x.mean()) / (x.std() + 1e-12), axis=0)
-#     df_tucker_scores['patron_dominante_relativo'] = tucker_z.idxmax(axis=1)
-
-#     df_merge = df_comp_cluster[['Case','cluster_kmeans']].merge(
-#         df_tucker_scores[['Case','patron_dominante_relativo'] + pat_tucker_cols], on='Case', how='inner'
-#     )
-
-#     # 1. Tabla de contingencia cruzada
-#     tabla_dom = pd.crosstab(df_merge['cluster_kmeans'], df_merge['patron_dominante_relativo'], margins=True)
-#     print("\n  Patrón Tucker dominante RELATIVO por cluster de composición:")
-#     print(tabla_dom.to_string())
-#     tabla_dom.to_csv(out('COMPARACION_cluster_vs_patron_tucker_dominante.csv'), sep=';', encoding='utf-8-sig')
-
-#     # 2. Heatmap de contingencia
-#     tabla_pct = pd.crosstab(df_merge['cluster_kmeans'], df_merge['patron_dominante_relativo'], normalize='index') * 100
-#     cols_ord = sorted(tabla_pct.columns, key=lambda x: int(x.split('_')[1]) if '_' in x else 0)
-#     tabla_pct = tabla_pct.reindex(columns=cols_ord, fill_value=0)
-
-#     fig, ax = plt.subplots(figsize=(N_PAT_T*1.5+2, K_FINAL*0.9+2), facecolor='white')
-#     ax.imshow(tabla_pct.values, cmap='YlOrRd', vmin=0, vmax=100, aspect='auto')
-#     ax.set_xticks(range(len(cols_ord))); ax.set_xticklabels([f"P{c.split('_')[1]}" for c in cols_ord], fontweight='bold')
-#     ax.set_yticks(range(K_FINAL)); ax.set_yticklabels([f'Cluster {k}\n(n={(labels_km+1==k).sum()})' for k in range(1, K_FINAL+1)], fontweight='bold')
-#     for i in range(K_FINAL):
-#         for j in range(len(cols_ord)):
-#             val = tabla_pct.values[i, j]
-#             ax.text(j, i, f'{val:.0f}%', ha='center', va='center', fontweight='bold', color='white' if val > 50 else 'black')
-#     plt.savefig(out('COMPARACION_cluster_vs_patron_tucker_heatmap.png'), dpi=200, bbox_inches='tight')
-#     plt.close()
-
-# # ============================================================
-# # 15. EXPORTAR Y EVALUAR (LÓGICA CON K_FINAL ACTUALIZADO)
-# # ============================================================
-# print("\nExportando resultados y evaluando estabilidad...")
-# df_comp_cluster['silhouette_kmeans'] = silhouette_samples(X_casos, labels_km)
-# df_comp_cluster.to_csv(out('CLUSTERING_COMPOSICION_por_caso.csv'), index=False, sep=';', encoding='utf-8-sig', decimal=',')
-
-# aris_boot=[]
-# for _ in range(100):
-#     idx=resample(range(len(X_casos)))
-#     km_b=KMeans(n_clusters=K_FINAL, n_init=10)
-#     lbl_b=km_b.fit_predict(X_casos[idx])
-#     aris_boot.append(adjusted_rand_score(labels_km[idx],lbl_b))
-# print(f"  Estabilidad Bootstrap (k={K_FINAL}): ARI={np.mean(aris_boot):.3f} ± {np.std(aris_boot):.3f}")
-
-# print("\n✓ PROCESO COMPLETADO EXITOSAMENTE.")
-
-# # py -3.12 c:/Users/carme/OneDrive/Escritorio/M.UCM/TFM/1700MICRAS/CENTROIDE/FEATURE_ENGINEERING/clustering_features_eda2.py
 
 """
 
@@ -573,7 +71,7 @@ try:
     HDBSCAN_OK = True
 except ImportError:
     HDBSCAN_OK = False
-    print("[AVISO] hdbscan no disponible. Instalar: pip install hdbscan --break-system-packages")
+    print("[AVISO] hdbscan no disponible.")
 
 warnings.filterwarnings('ignore')
 Path(OUTPUT_FOLDER).mkdir(parents=True, exist_ok=True)
@@ -741,7 +239,7 @@ if n_outliers > 0:
         zs  = z_matrix[idx]
         top = sorted(zip(pct_cols, zs), key=lambda x: -x[1])[:3]
         top_str = ', '.join([f"{c}(z={z:.1f})" for c,z in top if z>ZSCORE_OUTLIER])
-        print(f"  ⚠ OUTLIER: {caso} → {top_str}")
+        print(f"  OUTLIER: {caso} : {top_str}")
     print(f"\n  Total outliers: {n_outliers}")
     df_comp_cluster = df_comp[mask_ok].copy().reset_index(drop=True)
 else:
@@ -883,7 +381,7 @@ fig, ax = plt.subplots(figsize=(max(18, len(casos_cluster)*0.28), 8), facecolor=
 dendrogram(Z_link, labels=list(casos_cluster), ax=ax,
            color_threshold=0.7*max(Z_link[:,2]),
            leaf_rotation=75, leaf_font_size=6, above_threshold_color='#888888')
-ax.set_title('Dendrograma Jerárquico (Ward) — Composición de Tipos de Tile por Caso'
+ax.set_title('Dendrograma Jerárquico (Ward) - Composición de Tipos de Tile por Caso'
              + (f'\nOutliers excluidos: {outlier_casos}' if n_outliers>0 else ''),
              fontsize=12, fontweight='bold')
 ax.set_ylabel('Distancia (Ward)'); ax.set_xlabel('Casos')
@@ -905,7 +403,7 @@ X_2d   = pca2.fit_transform(X_casos)
 var_2d = pca2.explained_variance_ratio_
 
 fig, axes = plt.subplots(1, 3, figsize=(18,6), facecolor='white')
-fig.suptitle(f'Proyección 2D — Clustering por Composición de Tiles (k={K_FINAL})\n'
+fig.suptitle(f'Proyección 2D - Clustering por Composición de Tiles (k={K_FINAL})\n'
              f'Dim1={var_2d[0]*100:.1f}% | Dim2={var_2d[1]*100:.1f}% varianza',
              fontsize=12, fontweight='bold')
 for ax, titulo, etq in zip(axes,
@@ -936,7 +434,7 @@ plt.close()
 
 
 fig, axes = plt.subplots(1, 4, figsize=(24,6), facecolor='white')
-fig.suptitle('Comparación de Algoritmos de Clustering — Composición de Tiles\n'
+fig.suptitle('Comparación de Algoritmos de Clustering - Composición de Tiles\n'
              f'Dim1={var_2d[0]*100:.1f}% | Dim2={var_2d[1]*100:.1f}% varianza explicada',
              fontsize=13, fontweight='bold')
 
@@ -1124,57 +622,7 @@ plt.suptitle(f'PERFIL MORFOLÓGICO POR CLUSTER — Composición de Tiles k={K_FI
 plt.savefig(out('07_perfil_features_por_cluster.png'),
             dpi=180,bbox_inches='tight',facecolor='white')
 plt.close()
-print("  ✓ 07_perfil_features_por_cluster.png")
-
-# # ============================================================
-# # 14. COMPARACION CON TUCKER
-# # ============================================================
-
-# tucker_csv_path = Path(TUCKER_CSV)
-# aris = {}
-# if tucker_csv_path.exists():
-#     print("\nComparando con Tucker...")
-#     df_tucker = pd.read_csv(TUCKER_CSV, sep=';')
-#     df_comp2  = df_comp_cluster[['Case','cluster_kmeans']].merge(
-#         df_tucker[['Case']+[c for c in df_tucker.columns if c.startswith('km_')]],
-#         on='Case', how='inner')
-#     for col in [c for c in df_comp2.columns if c not in ('Case','cluster_kmeans')]:
-#         try: aris[col] = adjusted_rand_score(df_comp2['cluster_kmeans'].values, df_comp2[col].values)
-#         except: pass
-#     for col,ari in aris.items():
-#         nivel = 'ALTO' if ari>0.6 else ('MEDIO' if ari>0.3 else 'BAJO')
-#         print(f"    {col}: ARI={ari:.3f} ({nivel})")
-
-#     fig,axes=plt.subplots(1,len(aris)+1,figsize=(6*(len(aris)+1),6),facecolor='white')
-#     fig.suptitle(f'Composición Tiles vs Tucker (k={K_FINAL})',fontsize=13,fontweight='bold')
-#     ax=axes[0]
-#     for k in range(1,K_FINAL+1):
-#         mask=labels_km+1==k
-#         ax.scatter(X_2d[mask,0],X_2d[mask,1],c=CLUSTER_COLORS[k-1],s=90,
-#                    alpha=0.85,edgecolors='white',lw=0.8,label=f'C{k}',zorder=3)
-#     ax.set_title(f'Clusters CompTile (k={K_FINAL})'); ax.legend(fontsize=9)
-#     ax.grid(alpha=0.25); ax.set_facecolor('#FAFAFA')
-#     for ax_i,(col,ari) in enumerate(aris.items()):
-#         ax=axes[ax_i+1]; n_tck=df_comp2[col].nunique()
-#         mat=np.zeros((K_FINAL,n_tck),dtype=int)
-#         for fd,tk in zip(df_comp2['cluster_kmeans'],df_comp2[col]):
-#             mat[int(fd)-1,int(tk)-1]+=1
-#         sns.heatmap(mat,ax=ax,annot=True,fmt='d',cmap='YlOrRd',
-#                     xticklabels=[f'Tucker C{k}' for k in range(1,n_tck+1)],
-#                     yticklabels=[f'CT C{k}' for k in range(1,K_FINAL+1)])
-#         nivel='ALTO' if ari>0.6 else ('MEDIO' if ari>0.3 else 'BAJO')
-#         ax.set_title(f'CT(k={K_FINAL}) vs {col}\nARI={ari:.3f} ({nivel})',fontsize=10,fontweight='bold')
-#     plt.tight_layout()
-#     plt.savefig(out('08_comparacion_tucker.png'),dpi=200,bbox_inches='tight',facecolor='white')
-#     plt.close()
-#     print("  ✓ 08_comparacion_tucker.png")
-
-#     df_cruce=df_comp_cluster[['Case','cluster_kmeans']].merge(
-#         df_tucker[['Case','km_k2','km_k5']],on='Case',how='inner')
-#     df_cruce.columns=['Case','cluster_composicion','tucker_k2','tucker_k5']
-#     df_cruce.to_csv(out('CORRESPONDENCIA_composicion_tucker.csv'),
-#                     index=False,sep=';',encoding='utf-8-sig',decimal=',')
-#     print("  ✓ CORRESPONDENCIA_composicion_tucker.csv")
+print("   07_perfil_features_por_cluster.png")
 
 # COMPARACION CON PATRONES TUCKER (no con clusters Tucker)
 
@@ -1202,7 +650,7 @@ if tucker_tiles_path.exists() and tucker_scores_path.exists():
     )
     print(f"  Casos en común: {len(df_merge)}")
 
-    # ── 1. Tabla: distribución del patrón dominante Tucker por cluster ──
+    # - 1. Tabla: distribución del patrón dominante Tucker por cluster ──
     tabla_dom = pd.crosstab(
         df_merge['cluster_kmeans'],
         df_merge['patron_dominante'],
@@ -1216,7 +664,7 @@ if tucker_tiles_path.exists() and tucker_scores_path.exists():
         sep=';', encoding='utf-8-sig'
     )
 
-    # ── 2. Heatmap: % patrón Tucker dominante por cluster ──
+    # - 2. Heatmap: % patrón Tucker dominante por cluster ──
     tabla_pct = pd.crosstab(
         df_merge['cluster_kmeans'],
         df_merge['patron_dominante'],
@@ -1263,9 +711,9 @@ if tucker_tiles_path.exists() and tucker_scores_path.exists():
     plt.savefig(out('COMPARACION_cluster_vs_patron_tucker_heatmap.png'),
                 dpi=200, bbox_inches='tight', facecolor='white')
     plt.close()
-    print("  ✓ COMPARACION_cluster_vs_patron_tucker_heatmap.png")
+    print("   COMPARACION_cluster_vs_patron_tucker_heatmap.png")
 
-    # ── 3. Score medio Tucker por cluster ──
+    # - 3. Score medio Tucker por cluster ──
     scores_por_cluster = df_merge.groupby('cluster_kmeans')[pat_tucker_cols].mean()
     print("\n  Score medio Tucker por cluster de composición:")
     print(scores_por_cluster.round(3).to_string())
@@ -1306,9 +754,9 @@ if tucker_tiles_path.exists() and tucker_scores_path.exists():
     plt.savefig(out('COMPARACION_score_tucker_por_cluster.png'),
                 dpi=200, bbox_inches='tight', facecolor='white')
     plt.close()
-    print("  ✓ COMPARACION_score_tucker_por_cluster.png")
+    print("  COMPARACION_score_tucker_por_cluster.png")
 
-    # ── 4. Radar: perfil Tucker de cada cluster ──
+    # - 4. perfil Tucker de cada cluster
     angles = [n/float(N_PAT_T)*2*np.pi for n in range(N_PAT_T)] + [0]
     fig, axes = plt.subplots(
         1, K_FINAL, figsize=(4.5*K_FINAL, 5),
@@ -1345,12 +793,8 @@ if tucker_tiles_path.exists() and tucker_scores_path.exists():
             fontsize=11, fontweight='bold', color=col, pad=15
         )
     plt.tight_layout()
-    #plt.savefig(out('COMPARACION_radar_tucker_por_cluster.png'),
-                #dpi=200, bbox_inches='tight', facecolor='white')
-    #plt.close()
-    #print("  ✓ COMPARACION_radar_tucker_por_cluster.png")
-
-    # ── 5. Tabla exportable completa caso a caso ──
+   
+    # ─ 5. Tabla exportable completa caso a caso 
     df_export_comp = df_merge[
         ['Case', 'cluster_kmeans', 'patron_dominante'] + pat_tucker_cols
     ].copy()
@@ -1390,7 +834,7 @@ if n_outliers > 0:
     for c in cols_exp:
         if c not in df_out.columns: df_out[c]=np.nan
     df_export=pd.concat([df_comp_cluster[cols_exp],df_out[cols_exp]],ignore_index=True)
-    print(f"  ⚠ {n_outliers} outlier(s) con cluster=0: {outlier_casos}")
+    print(f" {n_outliers} outlier(s) con cluster=0: {outlier_casos}")
 else:
     df_export=df_comp_cluster[cols_exp]
 
@@ -1443,7 +887,7 @@ pd.DataFrame({
     'ARI_vs_KMeans':  [1.0,ari_km_hc,ari_km_gm,ari_km_spec],
     'Bootstrap_ARI':  [np.mean(aris_boot),None,None,None],
 }).to_csv(out('METRICAS_evaluacion.csv'),index=False,sep=';',encoding='utf-8-sig',decimal=',')
-print("  ✓ METRICAS_evaluacion.csv")
+print("   METRICAS_evaluacion.csv")
 
 #  17. MOSAICOS DE CROPS
 
@@ -1578,15 +1022,9 @@ sil_sp  = silhouette_score(X_casos, labels_spec)
 ari_sp  = adjusted_rand_score(labels_km, labels_spec)
 
 print(f"""
-{'='*60}
-CLUSTERING POR COMPOSICION DE TILES COMPLETADO
-{'='*60}
+
 Carpeta: {OUTPUT_FOLDER}
 
-PASO 1 — Tiles: k={K_TILES} tipos de tile
-PASO 2 — Casos: k={K_FINAL} clusters
-
-OUTLIERS: {n_outliers} → cluster=0: {outlier_casos if n_outliers>0 else 'Ninguno'}
 
 DISTRIBUCION K-Means:
 {dict(pd.Series(labels_km+1).value_counts().sort_index())}
@@ -1601,7 +1039,7 @@ METRICAS:
 
 # EXPORTAR PERFILES A CSV/EXCEL
 
-# ── 1. Perfil de features biológicas por CLUSTER 
+# 1. Perfil de features biológicas por CLUSTER 
 df_perfil_clusters = df_fn.copy()
 df_perfil_clusters.index.name = 'feature'
 df_perfil_clusters = df_perfil_clusters.reset_index()
@@ -1629,7 +1067,7 @@ with pd.ExcelWriter(out('PERFIL_features_por_cluster.xlsx'), engine='openpyxl') 
         df_k.to_excel(writer, sheet_name=f'Cluster_{k}_n{n_casos_k}', index=False)
 
 
-# ── 2. Perfil de features biológicas por TIPO DE TILE (equivalente a 00_perfil_cluster_tiles)
+# 2. Perfil de features biológicas por TIPO DE TILE (equivalente a 00_perfil_cluster_tiles)
 
 df_perfil_tiles = z_tiles.T.copy()  # features en filas, tiles en columnas
 df_perfil_tiles.index.name = 'feature'
@@ -1657,7 +1095,7 @@ with pd.ExcelWriter(out('PERFIL_features_por_tile.xlsx'), engine='openpyxl') as 
         df_ct = df_ct.sort_values('abs_z_score', ascending=False).drop(columns='abs_z_score')
         n_tiles_ct = (labels_tiles + 1 == ct).sum()
         df_ct.to_excel(writer, sheet_name=f'Tile_C{ct}_n{n_tiles_ct}', index=False)
-print("  ✓ PERFIL_features_por_tile.xlsx")
+print("  PERFIL_features_por_tile.xlsx")
 
 
 # py -3.12 c:/Users/carme/OneDrive/Escritorio/M.UCM/TFM/1700MICRAS/CENTROIDE/FEATURE_ENGINEERING/clustering_features_eda2.py
